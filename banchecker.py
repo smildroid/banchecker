@@ -53,6 +53,38 @@ def inject_custom_css():
     </style>
     """, unsafe_allow_html=True)
 
+# Re-enabled Discord webhook alert function. It sends a Discord embed containing all the ban information.
+def send_discord_alert(webhook, result):
+    if not webhook:
+        return
+    ban_types = []
+    if result["vac"]:
+        ban_types.append("VAC")
+    if result["community"]:
+        ban_types.append("Community")
+    if result["game_bans"] > 0:
+        ban_types.append(f"Game ({result['game_bans']})")
+    
+    embed = {
+        "title": "🚨 Steam Ban Detected",
+        "color": 16711680,
+        "thumbnail": {"url": result["avatar"]},
+        "fields": [
+            {"name": "Account", "value": f"[{result['username']}]({result['profile_url']})", "inline": True},
+            {"name": "SteamID", "value": result["steamid"], "inline": True},
+            {"name": "Ban Types", "value": " | ".join(ban_types) if ban_types else "None", "inline": False},
+            {"name": "Last Ban", "value": f"{result['last_ban_days']} days ago", "inline": True},
+            {"name": "Checked At", "value": result["last_checked"], "inline": True}
+        ],
+        "footer": {"text": "Steam Ban Checker • Real-time Monitoring"}
+    }
+    try:
+        requests.post(webhook, json={"embeds": [embed]})
+    except Exception as e:
+        st.error(f"Failed to send Discord notification: {e}")
+
+# This function checks each Steam64 ID and returns a list of account details.
+# For each account that meets any ban condition (VAC, game ban, community ban), if a webhook is provided, a Discord alert is sent.
 def check_bans(api_key, webhook, steam_ids):
     results = []
     for sid in steam_ids:
@@ -89,6 +121,10 @@ def check_bans(api_key, webhook, steam_ids):
                 "registration_date": registration_date
             }
 
+            # If any ban conditions are met, send a Discord alert.
+            if webhook and (result["vac"] or result["game_bans"] > 0 or result["community"]):
+                send_discord_alert(webhook, result)
+
             results.append(result)
         except Exception as e:
             st.error(f"Error checking {sid}: {str(e)}")
@@ -113,7 +149,7 @@ def main():
         st.markdown("<small class='help-link'><a href='https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks' target='_blank'>Guide</a></small>", unsafe_allow_html=True)
 
         st.markdown("<small style='color: #AAA;'>This tool doesn't store any API keys or user data. All inputs are session-only.</small>", unsafe_allow_html=True)
-        # Add the image below the credential reminder; using use_container_width instead of the deprecated use_column_width.
+        # Add the image below the reminder, using use_container_width as recommended.
         st.image("https://i.imgur.com/jZsExFB.jpeg", use_container_width=True)
 
     st.title("🛡️ Steam Account Monitor")
