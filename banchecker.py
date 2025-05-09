@@ -3,6 +3,50 @@ import requests
 import time
 from datetime import datetime
 from threading import Thread
+from streamlit.components.v1 import html
+
+# Custom CSS for styling
+def inject_custom_css():
+    st.markdown("""
+    <style>
+        .main {
+            background-color: #0E1117;
+        }
+        .sidebar .sidebar-content {
+            background-color: #1a1a1a;
+        }
+        h1 {
+            color: #ff4b4b;
+            border-bottom: 2px solid #ff4b4b;
+        }
+        .stExpander {
+            background: #1a1a1a;
+            border-radius: 8px;
+            border: 1px solid #333;
+        }
+        .stAlert {
+            border-radius: 8px;
+        }
+        .banned-badge {
+            color: white;
+            background: #ff4b4b;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+        }
+        .clean-badge {
+            color: white;
+            background: #00cc66;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+        }
+        .avatar-img {
+            border-radius: 8px;
+            border: 2px solid #333;
+        }
+    </style>
+    """, unsafe_allow_html=True)
 
 def check_bans(api_key, webhook, steam_ids, ban_history):
     results = []
@@ -11,45 +55,40 @@ def check_bans(api_key, webhook, steam_ids, ban_history):
             # Get ban info
             ban_response = requests.get(
                 "https://api.steampowered.com/ISteamUser/GetPlayerBans/v1/",
-                params={"key": api_key, "steamids": sid}
+                params={"key": api_key, "steamids": sid},
+                timeout=10
             ).json()
             
             # Get profile info
             profile_response = requests.get(
                 "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/",
-                params={"key": api_key, "steamids": sid}
+                params={"key": api_key, "steamids": sid},
+                timeout=10
             ).json()
             
-            # Extract profile data
+            # Process responses
             profile_data = profile_response.get("response", {}).get("players", [{}])[0]
             ban_data = ban_response.get("players", [{}])[0]
-            
-            # Process bans
-            vac_banned = ban_data.get("VACBanned", False)
-            game_bans = ban_data.get("NumberOfGameBans", 0)
-            community_banned = ban_data.get("CommunityBanned", False)
-            days_since_last_ban = ban_data.get("DaysSinceLastBan", 0)
             
             result = {
                 "steamid": sid,
                 "username": profile_data.get("personaname", "Unknown"),
-                "avatar": profile_data.get("avatarfull", ""),
+                "avatar": profile_data.get("avatarfull", "https://steamuserimages-a.akamaihd.net/ugc/885384897182110030/1D7D1D7D1D7D1D7D1D7D1D7D1D7D1D7D/"),
                 "profile_url": profile_data.get("profileurl", f"https://steamcommunity.com/profiles/{sid}"),
-                "vac": vac_banned,
-                "game_bans": game_bans,
-                "community": community_banned,
-                "last_ban_days": days_since_last_ban,
+                "vac": ban_data.get("VACBanned", False),
+                "game_bans": ban_data.get("NumberOfGameBans", 0),
+                "community": ban_data.get("CommunityBanned", False),
+                "last_ban_days": ban_data.get("DaysSinceLastBan", 0),
+                "last_checked": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "new_ban": False
             }
             
-            # Check for new bans
+            # Check ban history
             prev_status = ban_history.get(sid, {})
-            current_ban_status = (vac_banned, game_bans, community_banned)
-            
-            if any(current_ban_status):
-                if not prev_status or (prev_status.get("vac") != vac_banned or 
-                                     prev_status.get("game_bans") != game_bans or 
-                                     prev_status.get("community") != community_banned):
+            if any([result["vac"], result["game_bans"] > 0, result["community"]]):
+                if not prev_status or (prev_status.get("vac") != result["vac"] or 
+                                    prev_status.get("game_bans") != result["game_bans"] or 
+                                    prev_status.get("community") != result["community"]):
                     result["new_ban"] = True
                     send_discord_alert(webhook, result)
             
@@ -66,24 +105,22 @@ def send_discord_alert(webhook, result):
         return
     
     ban_types = []
-    if result["vac"]:
-        ban_types.append("VAC")
-    if result["community"]:
-        ban_types.append("Community")
-    if result["game_bans"] > 0:
-        ban_types.append(f"Game ({result['game_bans']})")
+    if result["vac"]: ban_types.append("VAC")
+    if result["community"]: ban_types.append("Community")
+    if result["game_bans"] > 0: ban_types.append(f"Game ({result['game_bans']})")
     
     embed = {
-        "title": "🚨 NEW BAN DETECTED 🚨",
+        "title": "🚨 Steam Ban Detected",
         "color": 16711680,
         "thumbnail": {"url": result["avatar"]},
         "fields": [
             {"name": "Account", "value": f"[{result['username']}]({result['profile_url']})", "inline": True},
             {"name": "SteamID", "value": result["steamid"], "inline": True},
-            {"name": "Ban Types", "value": ", ".join(ban_types) if ban_types else "None", "inline": False},
-            {"name": "Days Since Last Ban", "value": str(result["last_ban_days"]), "inline": True}
+            {"name": "Ban Types", "value": " | ".join(ban_types) if ban_types else "None", "inline": False},
+            {"name": "Last Ban", "value": f"{result['last_ban_days']} days ago", "inline": True},
+            {"name": "Checked At", "value": result["last_checked"], "inline": True}
         ],
-        "footer": {"text": f"Detected at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"}
+        "footer": {"text": "Steam Ban Checker • Real-time Monitoring"}
     }
     
     try:
@@ -93,12 +130,18 @@ def send_discord_alert(webhook, result):
 
 def automatic_checker(api_key, webhook, steam_ids, interval, ban_history):
     while st.session_state.automatic_running:
-        st.experimental_rerun()
+        check_bans(api_key, webhook, steam_ids, ban_history)
         time.sleep(interval * 60)
 
 def main():
-    st.set_page_config(page_title="Steam Ban Checker", page_icon="🔍", layout="wide")
-    st.title("Steam Ban Checker 🔍")
+    inject_custom_css()
+    
+    st.set_page_config(
+        page_title="Steam Ban Monitor",
+        page_icon="🛡️",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
     
     # Initialize session state
     if 'ban_history' not in st.session_state:
@@ -106,62 +149,82 @@ def main():
     if 'automatic_running' not in st.session_state:
         st.session_state.automatic_running = False
     
-    # Sidebar for configuration
+    # Sidebar Configuration
     with st.sidebar:
-        st.header("Configuration")
-        api_key = st.text_input("Steam API Key:", type="password")
-        st.markdown("[Get API Key](https://steamcommunity.com/dev/apikey)")
+        st.title("⚙️ Configuration")
+        api_key = st.text_input("Steam API Key:", type="password", help="Get from https://steamcommunity.com/dev")
+        webhook = st.text_input("Discord Webhook URL:", help="Optional for ban notifications")
         
-        webhook = st.text_input("Discord Webhook URL:")
-        st.markdown("[Webhook Guide](https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks)")
+        st.divider()
         
-        # Automatic checking controls
-        auto_check = st.checkbox("Enable Automatic Checking")
+        st.header("🔄 Automatic Checking")
+        auto_check = st.checkbox("Enable Scheduled Checks")
         if auto_check:
-            check_interval = st.number_input("Check Interval (minutes):", min_value=1, value=60)
-            if st.button("Start Automatic Checks" if not st.session_state.automatic_running else "Stop Automatic Checks"):
+            check_interval = st.slider("Check Interval (minutes):", 1, 360, 60)
+            
+            if st.button("▶️ Start Monitoring" if not st.session_state.automatic_running else "⏹️ Stop Monitoring"):
                 st.session_state.automatic_running = not st.session_state.automatic_running
                 if st.session_state.automatic_running:
-                    Thread(target=automatic_checker, args=(api_key, webhook, 
-                                                          st.session_state.get('tracked_ids', []), 
-                                                          check_interval, 
-                                                          st.session_state.ban_history)).start()
+                    Thread(target=automatic_checker, args=(
+                        api_key, webhook, 
+                        st.session_state.get('tracked_ids', []), 
+                        check_interval, 
+                        st.session_state.ban_history
+                    )).start()
     
-    # Main interface
-    steam_ids_input = st.text_area("Steam64 IDs (separate by commas or new lines):", 
-                                  placeholder="76561197960287930, 76561197960287931\n76561197960287932")
+    # Main Interface
+    st.title("🛡️ Steam Account Monitor")
+    st.caption("Track VAC, Game, and Community bans in real-time")
     
-    steam_ids = [sid.strip() for sid in steam_ids_input.replace('\n', ',').split(',') if sid.strip().isdigit()]
-    st.session_state.tracked_ids = steam_ids
-    
-    if st.button("Check Bans"):
-        if not api_key:
-            st.error("API Key required!")
-            return
-            
-        results = check_bans(api_key, webhook, steam_ids, st.session_state.ban_history)
+    # Input Section
+    with st.container():
+        steam_ids_input = st.text_area(
+            "📥 Enter Steam64 IDs (separate by commas or new lines):",
+            height=150,
+            placeholder="76561197960287930, 76561197960287931\n76561197960287932",
+            help="Paste Steam64 IDs separated by commas or new lines"
+        )
         
-        # Display results
+        col1, col2 = st.columns([1, 6])
+        with col1:
+            if st.button("🔍 Check Now", use_container_width=True):
+                st.session_state.tracked_ids = process_ids(steam_ids_input)
+        with col2:
+            if st.session_state.get('tracked_ids'):
+                st.success(f"Tracking {len(st.session_state.tracked_ids)} accounts")
+    
+    # Results Display
+    if st.session_state.get('tracked_ids') and api_key:
+        results = check_bans(api_key, webhook, st.session_state.tracked_ids, st.session_state.ban_history)
+        
         for res in results:
             with st.expander(f"{res['username']} ({res['steamid']})", expanded=res['new_ban']):
                 col1, col2 = st.columns([1, 4])
+                
                 with col1:
-                    if res["avatar"]:
-                        st.image(res["avatar"], width=100)
+                    st.image(res["avatar"], use_column_width=True, output_format="PNG", 
+                            caption=f"Last checked: {res['last_checked']}")
+                
                 with col2:
                     st.markdown(f"""
-                    **Account Status:**
-                    - VAC Banned: `{"Yes" if res["vac"] else "No"}`
-                    - Game Bans: `{res["game_bans"]}`
-                    - Community Banned: `{"Yes" if res["community"] else "No"}`
-                    - Days Since Last Ban: `{res["last_ban_days"]}`
+                    **Account Status**
+                    - **VAC Banned:** `{"🔴 Yes" if res["vac"] else "🟢 No"}`
+                    - **Game Bans:** `{"⚠️" * res["game_bans"]} ({res['game_bans']})`
+                    - **Community Banned:** `{"🔴 Yes" if res["community"] else "🟢 No"}`
+                    - **Days Since Last Ban:** `{res['last_ban_days'] or 'Never'}`
                     """)
-                    st.markdown(f"[Steam Profile]({res['profile_url']})")
-                
-                if res["new_ban"]:
-                    st.error("NEW BAN DETECTED!")
-                else:
-                    st.success("No new bans detected")
+                    
+                    st.markdown(f"🔗 [Steam Profile]({res['profile_url']})")
+                    
+                    if res["new_ban"]:
+                        st.error("🚨 NEW BAN DETECTED!")
+                    elif any([res["vac"], res["community"], res["game_bans"] > 0]):
+                        st.warning("Account has existing bans")
+                    else:
+                        st.success("No bans detected")
+
+def process_ids(input_text):
+    return [sid.strip() for sid in input_text.replace('\n', ',').split(',') if sid.strip().isdigit()]
 
 if __name__ == "__main__":
     main()
