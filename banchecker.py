@@ -212,7 +212,7 @@ def main():
         with col_api:
             api_key = st.text_input("Steam API Key:", type="password", key="api_key_input")
         with col_api_help:
-            st.markdown("[How to get it?](https://steamcommunity.com/dev)", unsafe_allow_html=True)
+            st.markdown("[Fetch](https://steamcommunity.com/dev)", unsafe_allow_html=True)
         
         # Discord webhook and help link on one row
         col_webhook, col_webhook_help = st.columns([4, 1])
