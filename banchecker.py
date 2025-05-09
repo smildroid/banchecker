@@ -6,8 +6,8 @@ from io import BytesIO
 import re
 
 st.set_page_config(
-    page_title="Steam Ban Monitor",
-    page_icon="🛡️",
+    page_title="🔪️ am I cooked?",
+    page_icon="👨‍🍳",
     layout="wide",
     initial_sidebar_state="expanded"
 )
