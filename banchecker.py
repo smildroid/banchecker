@@ -112,7 +112,9 @@ def main():
         webhook = st.text_input("Discord Webhook URL (optional):", key="webhook_input")
         st.markdown("<small class='help-link'><a href='https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks' target='_blank'>Guide</a></small>", unsafe_allow_html=True)
 
-        st.markdown("<small style='color: #AAA;'>This tool doesn't store any user data. All inputs are session-only.</small>", unsafe_allow_html=True)
+        st.markdown("<small style='color: #AAA;'>This tool doesn't store any API keys or user data. All inputs are session-only.</small>", unsafe_allow_html=True)
+        # Add the image below the credential reminder; using use_container_width instead of the deprecated use_column_width.
+        st.image("https://i.imgur.com/jZsExFB.jpeg", use_container_width=True)
 
     st.title("🛡️ Steam Account Monitor")
     placeholder_text = (
